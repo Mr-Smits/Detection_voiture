@@ -14,10 +14,37 @@ boxes = []
 confidences = []
 class_ids = []
 
+# Dictionnaire pour suivre les véhicules
+vehicle_ids = {}
+next_vehicle_id = 1
+
 # Obtenir le FPS de la vidéo pour ajuster l'attente entre les frames
 fps = cap.get(cv2.CAP_PROP_FPS)
 frame_time = 1.0 / fps  # Temps entre chaque frame en secondes
 prev_time = time.time()
+
+# Définir les zones de confidentialité (deux triangles)
+def is_in_confidential_zone(point, triangles):
+    def is_inside_triangle(pt, tri):
+        x, y = pt
+        x1, y1, x2, y2, x3, y3 = tri
+        # Calculer les aires des sous-triangles
+        area = abs((x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2)) / 2.0)
+        area1 = abs((x*(y2-y3) + x2*(y3-y) + x3*(y-y2)) / 2.0)
+        area2 = abs((x1*(y-y3) + x*(y3-y1) + x3*(y1-y)) / 2.0)
+        area3 = abs((x1*(y2-y) + x2*(y-y1) + x*(y1-y2)) / 2.0)
+        return area == (area1 + area2 + area3)
+
+    for tri in triangles:
+        if is_inside_triangle(point, tri):
+            return True
+    return False
+
+# Coordonnées des triangles (x, y pour chaque sommet)
+confidential_zones = [
+    (100, 0, 550, 600, 0, 600),  # Triangle 1
+    (400, 0, 1200, 0, 1200, 600)  # Triangle 2
+]
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -29,7 +56,7 @@ while cap.isOpened():
     height, width, _ = frame.shape
 
     # Traiter une image sur 15 (2 fps)
-    if frame_count % 15 == 0:
+    if frame_count % 7 == 0:
         blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
         net.setInput(blob)
         outputs = net.forward(output_layers)
@@ -47,6 +74,11 @@ while cap.isOpened():
                 if confidence > 0.5 and class_id == 2:  # Classe '2' pour voiture
                     center_x = int(detection[0] * width)
                     center_y = int(detection[1] * height)
+
+                    # Vérifier si le centre de la boîte est dans une zone de confidentialité
+                    if is_in_confidential_zone((center_x, center_y), confidential_zones):
+                        continue
+
                     w = int(detection[2] * width)
                     h = int(detection[3] * height)
                     x = int(center_x - w / 2)
@@ -57,17 +89,55 @@ while cap.isOpened():
 
         indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
 
-    # Affichage des positions et boîtes
+        # Assigner un ID à chaque détection
+        current_ids = {}
+        for i in range(len(boxes)):
+            if i in indexes:
+                x, y, w, h = boxes[i]
+                center_x = x + w // 2
+                center_y = y + h // 2
+
+                # Vérifier si la détection correspond à un véhicule existant
+                found_id = None
+                for vid, pos in vehicle_ids.items():
+                    prev_center_x, prev_center_y = pos
+                    if abs(center_x - prev_center_x) < 50 and abs(center_y - prev_center_y) < 50:
+                        found_id = vid
+                        break
+
+                # Si aucun ID existant ne correspond, en créer un nouveau
+                if found_id is None:
+                    found_id = next_vehicle_id
+                    next_vehicle_id += 1
+
+                current_ids[found_id] = (center_x, center_y)
+
+        # Mettre à jour les IDs des véhicules
+        vehicle_ids = current_ids
+
+    # Affichage des positions, boîtes et IDs
     for i in range(len(boxes)):
         if i in indexes:
             x, y, w, h = boxes[i]
             center_x = x + w // 2
             center_y = y + h // 2
 
-            # Dessiner les boîtes et afficher les positions
+            # Dessiner les boîtes et afficher les positions et IDs
+            found_id = None
+            for vid, pos in vehicle_ids.items():
+                if pos == (center_x, center_y):
+                    found_id = vid
+                    break
+
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            label = f"X: {center_x}, Y: {center_y}"
+            label = f"ID: {found_id}, X: {center_x}, Y: {center_y}"
             cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Dessiner les zones de confidentialité
+    for tri in confidential_zones:
+        pts = np.array([[tri[0], tri[1]], [tri[2], tri[3]], [tri[4], tri[5]]], np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        cv2.polylines(frame, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
 
     # Calculer le temps réel pour ajuster le délai
     current_time = time.time()
@@ -77,7 +147,7 @@ while cap.isOpened():
 
     # Afficher la vidéo avec annotations
     cv2.imshow("Frame", frame)
-    if cv2.waitKey(delay) & 0xFF == ord('q'):
+    if cv2.waitKey(1) != -1:
         break
 
 cap.release()
