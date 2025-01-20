@@ -21,6 +21,7 @@ memory_frames = 3  # Nombre de frames de mémoire pour le suivi
 vehicle_memory = {}
 frame_last_seen = {}  # Stocker la dernière frame vue pour chaque véhicule
 vehicle_speeds = {}  # Stocker les vitesses des véhicules
+vehicle_direction = {} # Stocker la direction des véhicules
 
 # Obtenir le FPS de la vidéo pour ajuster l'attente entre les frames
 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -136,6 +137,13 @@ while cap.isOpened():
 
                     vehicle_speeds[found_id] = (speed_x, speed_y)
                 
+                # Calculer la direction (l'angle en fonction de la vitesse)
+                if found_id in vehicle_ids:
+                    speed_x, speed_y = vehicle_speeds[found_id]
+                    if speed_x != 0:
+                        angle = np.arctan2(speed_y , speed_x)
+                        vehicle_direction[found_id] = angle
+                    
                 frame_last_seen[found_id] = frame_count
 
         # Mettre à jour les IDs des véhicules
@@ -176,9 +184,23 @@ while cap.isOpened():
                     break
 
             speed_x, speed_y = vehicle_speeds.get(found_id, (0, 0))
+            angle = vehicle_direction.get(found_id, 0)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            label = f"ID: {found_id}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}"
+            label = f"ID: {found_id}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}, Angle: {angle:.2f}"
             cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            #Desiner le vecteur de direction avec l'angle
+            x2 = int(50 * np.cos(angle) + center_x)
+            y2 = int(50 * np.sin(angle) + center_y)
+            cv2.line(frame, (center_x, center_y), (x2, y2), (0, 0, 255), 2)
+
+            #Dessiner un vecteur de direction juste avec les vitesse en x et y
+            x2 = int(speed_x * frame_modulo + center_x) 
+            y2 = int(speed_y * frame_modulo + center_y) 
+            cv2.line(frame, (center_x, center_y), (x2, y2), (255, 0, 0), 2)
+
+
+            
 
     # Dessiner les zones de confidentialité
     for tri in confidential_zones:
