@@ -14,9 +14,12 @@ boxes = []
 confidences = []
 class_ids = []
 
-# Dictionnaire pour suivre les véhicules
+# Dictionnaire pour suivre les véhicules avec une mémoire étendue
 vehicle_ids = {}
 next_vehicle_id = 1
+memory_frames = 3  # Nombre de frames de mémoire pour le suivi
+vehicle_memory = {}
+frame_last_seen = {}  # Stocker la dernière frame vue pour chaque véhicule
 
 # Obtenir le FPS de la vidéo pour ajuster l'attente entre les frames
 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -55,8 +58,10 @@ while cap.isOpened():
 
     height, width, _ = frame.shape
 
-    # Traiter une image sur 15 (2 fps)
-    if frame_count % 7 == 0:
+    frame_modulo = 7
+
+    # Traiter une image sur 7 (4 fps)
+    if frame_count % frame_modulo == 0:
         blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
         net.setInput(blob)
         outputs = net.forward(output_layers)
@@ -105,15 +110,41 @@ while cap.isOpened():
                         found_id = vid
                         break
 
-                # Si aucun ID existant ne correspond, en créer un nouveau
+                # Si aucun ID existant ne correspond, vérifier dans la mémoire
+                if found_id is None:
+                    for vid, positions in vehicle_memory.items():
+                        if any(abs(center_x - px) < 50 and abs(center_y - py) < 50 for px, py in positions):
+                            found_id = vid
+                            break
+
+                # Si toujours aucun ID, en créer un nouveau
                 if found_id is None:
                     found_id = next_vehicle_id
                     next_vehicle_id += 1
 
                 current_ids[found_id] = (center_x, center_y)
+                frame_last_seen[found_id] = frame_count
 
         # Mettre à jour les IDs des véhicules
         vehicle_ids = current_ids
+
+        # Mettre à jour la mémoire des positions
+        for vid, pos in current_ids.items():
+            if vid not in vehicle_memory:
+                vehicle_memory[vid] = []
+            vehicle_memory[vid].append(pos)
+            if len(vehicle_memory[vid]) > memory_frames:
+                vehicle_memory[vid].pop(0)
+
+        # Supprimer les véhicules qui ont disparu depuis plus de 5 frame analysé (soit 5 * frame modulo, 35 frames)
+        vehicles_to_remove = [vid for vid, last_seen in frame_last_seen.items() if frame_count - last_seen > 5*frame_modulo]
+        for vid in vehicles_to_remove:
+            if vid in vehicle_ids:
+                del vehicle_ids[vid]
+            if vid in vehicle_memory:
+                del vehicle_memory[vid]
+            if vid in frame_last_seen:
+                del frame_last_seen[vid]
 
     # Affichage des positions, boîtes et IDs
     for i in range(len(boxes)):
@@ -147,7 +178,7 @@ while cap.isOpened():
 
     # Afficher la vidéo avec annotations
     cv2.imshow("Frame", frame)
-    if cv2.waitKey(1) != -1:
+    if cv2.waitKey(delay) != -1:
         break
 
 cap.release()
