@@ -20,6 +20,7 @@ next_vehicle_id = 1
 memory_frames = 3  # Nombre de frames de mémoire pour le suivi
 vehicle_memory = {}
 frame_last_seen = {}  # Stocker la dernière frame vue pour chaque véhicule
+vehicle_speeds = {}  # Stocker les vitesses des véhicules
 
 # Obtenir le FPS de la vidéo pour ajuster l'attente entre les frames
 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -59,7 +60,6 @@ while cap.isOpened():
     height, width, _ = frame.shape
 
     frame_modulo = 7
-
     # Traiter une image sur 7 (4 fps)
     if frame_count % frame_modulo == 0:
         blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
@@ -123,6 +123,19 @@ while cap.isOpened():
                     next_vehicle_id += 1
 
                 current_ids[found_id] = (center_x, center_y)
+                
+                # Calculer la vitesse
+                if found_id in vehicle_ids:
+                    prev_x, prev_y = vehicle_ids[found_id]
+                    if(frame_count - frame_last_seen[found_id] > 0):
+                        speed_x = (center_x - prev_x) / (frame_count - frame_last_seen[found_id])
+                        speed_y = (center_y - prev_y) / (frame_count - frame_last_seen[found_id])
+                    else:
+                        speed_x = 0
+                        speed_y = 0
+
+                    vehicle_speeds[found_id] = (speed_x, speed_y)
+                
                 frame_last_seen[found_id] = frame_count
 
         # Mettre à jour les IDs des véhicules
@@ -136,7 +149,7 @@ while cap.isOpened():
             if len(vehicle_memory[vid]) > memory_frames:
                 vehicle_memory[vid].pop(0)
 
-        # Supprimer les véhicules qui ont disparu depuis plus de 5 frame analysé (soit 5 * frame modulo, 35 frames)
+        # Supprimer les véhicules qui ont disparu depuis plus de  5 frame analysé (soit 5 * frame modulo, 35 réel frames)
         vehicles_to_remove = [vid for vid, last_seen in frame_last_seen.items() if frame_count - last_seen > 5*frame_modulo]
         for vid in vehicles_to_remove:
             if vid in vehicle_ids:
@@ -145,23 +158,26 @@ while cap.isOpened():
                 del vehicle_memory[vid]
             if vid in frame_last_seen:
                 del frame_last_seen[vid]
+            if vid in vehicle_speeds:
+                del vehicle_speeds[vid]
 
-    # Affichage des positions, boîtes et IDs
+    # Affichage des positions, boîtes, IDs et vitesses
     for i in range(len(boxes)):
         if i in indexes:
             x, y, w, h = boxes[i]
             center_x = x + w // 2
             center_y = y + h // 2
 
-            # Dessiner les boîtes et afficher les positions et IDs
+            # Dessiner les boîtes et afficher les positions, IDs et vitesses
             found_id = None
             for vid, pos in vehicle_ids.items():
                 if pos == (center_x, center_y):
                     found_id = vid
                     break
 
+            speed_x, speed_y = vehicle_speeds.get(found_id, (0, 0))
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            label = f"ID: {found_id}, X: {center_x}, Y: {center_y}"
+            label = f"ID: {found_id}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}"
             cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     # Dessiner les zones de confidentialité
