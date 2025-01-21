@@ -35,7 +35,35 @@ layer_names = net.getLayerNames()
 output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
 
 # Lecture de la vidéo
-cap = cv2.VideoCapture("Video_route_1.mp4")
+import yt_dlp
+
+def get_youtube_stream_url(youtube_url, format_id='95'):  # 1280x720, format ID 95
+    ydl_opts = {
+        'format': format_id,  # Choisir un format spécifique
+        'quiet': False,       # Activer les logs pour le débogage
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(youtube_url, download=False)
+            formats = info_dict.get('formats', [])
+            for f in formats:
+                if f['format_id'] == format_id:
+                    return f['url']
+            raise Exception(f"Format ID {format_id} non trouvé.")
+    except Exception as e:
+        print(f"Erreur lors de l'extraction du flux : {e}")
+        raise Exception("Impossible de récupérer l'URL du flux YouTube.")
+
+
+youtube_url = "https://www.youtube.com/watch?v=EPKWu223XEg"  # Remplacez par l'ID du flux
+try:
+    stream_url = get_youtube_stream_url(youtube_url)
+    cap = cv2.VideoCapture(stream_url)
+except Exception as e:
+    print(f"Erreur : {e}")
+    exit()
+
+
 frame_count = 0
 
 # Dictionnaire pour stocker les véhicules
@@ -66,8 +94,8 @@ def is_in_confidential_zone(point, triangles):
 
 # Coordonnées des triangles (x, y pour chaque sommet)
 confidential_zones = [
-    (100, 0, 550, 600, 0, 600),  # Triangle 1
-    (400, 0, 1200, 0, 1200, 600)  # Triangle 2
+    (60, 0, 650, 720, 0, 720),  # Triangle 1 yx yx yx
+    (120, 0, 1280, 0, 1050, 720)  # Triangle 2 yx yx yx
 ]
 
 boxes = []
