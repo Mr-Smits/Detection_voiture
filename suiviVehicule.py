@@ -22,6 +22,8 @@ vehicle_memory = {}
 frame_last_seen = {}  # Stocker la dernière frame vue pour chaque véhicule
 vehicle_speeds = {}  # Stocker les vitesses des véhicules
 vehicle_direction = {} # Stocker la direction des véhicules
+vehicle_angle_buffer = {} # Buffer pour les moyennes des angles
+buffer_size = 5 # Taille du buffer pour les angles
 
 # Obtenir le FPS de la vidéo pour ajuster l'attente entre les frames
 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -140,10 +142,17 @@ while cap.isOpened():
                 # Calculer la direction (l'angle en fonction de la vitesse)
                 if found_id in vehicle_ids:
                     speed_x, speed_y = vehicle_speeds[found_id]
-                    if speed_x != 0:
+                    if speed_x != 0 or speed_y != 0:
                         angle = np.arctan2(speed_y , speed_x)
-                        vehicle_direction[found_id] = angle
-                    
+                        if found_id not in vehicle_angle_buffer:
+                            vehicle_angle_buffer[found_id] = []
+                        vehicle_angle_buffer[found_id].append(angle)
+                        if len(vehicle_angle_buffer[found_id]) > buffer_size:
+                            vehicle_angle_buffer[found_id].pop(0)
+                        # Calcul de la moyenne des angles
+                        avg_angle = np.mean(vehicle_angle_buffer[found_id])
+                        vehicle_direction[found_id] = avg_angle
+                
                 frame_last_seen[found_id] = frame_count
 
         # Mettre à jour les IDs des véhicules
@@ -168,6 +177,8 @@ while cap.isOpened():
                 del frame_last_seen[vid]
             if vid in vehicle_speeds:
                 del vehicle_speeds[vid]
+            if vid in vehicle_angle_buffer:
+                del vehicle_angle_buffer[vid]
 
     # Affichage des positions, boîtes, IDs et vitesses
     for i in range(len(boxes)):
@@ -184,7 +195,7 @@ while cap.isOpened():
                     break
 
             speed_x, speed_y = vehicle_speeds.get(found_id, (0, 0))
-            angle = vehicle_direction.get(found_id, 0)
+            angle = vehicle_direction.get(found_id, 0)  # Utiliser l'angle moyen
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             label = f"ID: {found_id}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}, Angle: {angle:.2f}"
             cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
