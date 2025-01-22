@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import time
+# Lecture de la vidéo
+import yt_dlp
 
 # Définir la classe Vehicle
 class Vehicle:
@@ -13,6 +15,7 @@ class Vehicle:
         self.last_seen = 0  # Dernière frame où le véhicule a été vu
         self.angle_buffer = []  # Buffer des derniers angles
         self.direction = "NONE" # Direction sur la route
+        self.plaque = "NULL" # Plaque d'immatriculation
 
     def update_position(self, position):
         self.position = position
@@ -34,8 +37,6 @@ net = cv2.dnn.readNet("yolov4-tiny.weights", "yolov4-tiny.cfg")
 layer_names = net.getLayerNames()
 output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
 
-# Lecture de la vidéo
-import yt_dlp
 
 def get_youtube_stream_url(youtube_url, format_id='95'):  # 1280x720, format ID 95
     ydl_opts = {
@@ -53,6 +54,42 @@ def get_youtube_stream_url(youtube_url, format_id='95'):  # 1280x720, format ID 
     except Exception as e:
         print(f"Erreur lors de l'extraction du flux : {e}")
         raise Exception("Impossible de récupérer l'URL du flux YouTube.")
+
+ii = 0
+
+def detect_license_plate(image):
+    """
+    Fausse fonction pour détecter une plaque d'immatriculation.
+
+    Args:
+        image (numpy.ndarray): Image d'entrée (par exemple, une frame d'une vidéo).
+
+    Returns:
+        str: Une plaque d'immatriculation fictive.
+    """
+    # Ici, on simule simplement une détection
+    if(ii % 10 == 0):
+        plaque = "NULL"
+    else:
+        plaque = "AB" + ii + "3CD"
+    return plaque
+
+# Définir les zones de confidentialité (deux triangles)
+def is_in_confidential_zone(point, triangles):
+    def is_inside_triangle(pt, tri):
+        x, y = pt
+        x1, y1, x2, y2, x3, y3 = tri
+        # Calculer les aires des sous-triangles
+        area = abs((x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2)) / 2.0)
+        area1 = abs((x*(y2-y3) + x2*(y3-y) + x3*(y-y2)) / 2.0)
+        area2 = abs((x1*(y-y3) + x*(y3-y1) + x3*(y1-y)) / 2.0)
+        area3 = abs((x1*(y2-y) + x2*(y-y1) + x*(y1-y2)) / 2.0)
+        return area == (area1 + area2 + area3)
+
+    for tri in triangles:
+        if is_inside_triangle(point, tri):
+            return True
+    return False
 
 
 youtube_url = "https://www.youtube.com/watch?v=EPKWu223XEg"  # Remplacez par l'ID du flux
@@ -74,23 +111,6 @@ next_vehicle_id = 1
 fps = cap.get(cv2.CAP_PROP_FPS)
 frame_time = 1.0 / fps  # Temps entre chaque frame en secondes
 prev_time = time.time()
-
-# Définir les zones de confidentialité (deux triangles)
-def is_in_confidential_zone(point, triangles):
-    def is_inside_triangle(pt, tri):
-        x, y = pt
-        x1, y1, x2, y2, x3, y3 = tri
-        # Calculer les aires des sous-triangles
-        area = abs((x1*(y2-y3) + x2*(y3-y1) + x3*(y1-y2)) / 2.0)
-        area1 = abs((x*(y2-y3) + x2*(y3-y) + x3*(y-y2)) / 2.0)
-        area2 = abs((x1*(y-y3) + x*(y3-y1) + x3*(y1-y)) / 2.0)
-        area3 = abs((x1*(y2-y) + x2*(y-y1) + x*(y1-y2)) / 2.0)
-        return area == (area1 + area2 + area3)
-
-    for tri in triangles:
-        if is_inside_triangle(point, tri):
-            return True
-    return False
 
 # Coordonnées des triangles (x, y pour chaque sommet)
 confidential_zones = [
@@ -208,6 +228,16 @@ while cap.isOpened():
                         vehicle.direction = direction
                     vehicle.last_seen = frame_count
 
+                    #On découpe la voiture dans l'image pour l'envoyer dans la fonction de reconnaissance de plaque
+
+                    voitureDecoupe = frame[y:y+h, x:x+w]
+                    #cv2.imshow("voiture", voitureDecoupe)
+                    #cv2.waitKey(0)
+                    plaque = detect_license_plate(voitureDecoupe)
+                    if(plaque != "NULL"):
+                        print("Plaque détectée : ", plaque)
+                        vehicle.plaque = plaque
+                
             # Supprimer les véhicules qui ont disparu depuis plus de  5 frame analysé (soit 5 * frame_modulo, 35 réel frames)
             vehicles_to_remove = [vid for vid, vehicle in vehicles.items() if frame_count - vehicle.last_seen > 5 * frame_modulo]
             for vid in vehicles_to_remove:
@@ -238,7 +268,11 @@ while cap.isOpened():
                             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
                         else:
                             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-                        label = f"ID: {vehicle.id}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}, Angle: {angle:.2f}"
+
+                        if(vehicle.plaque != "NULL"):
+                            label = f"ID: {vehicle.plaque}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}, Angle: {angle:.2f}"
+                        else:
+                            label = f"ID: {vehicle.id}, X: {center_x}, Y: {center_y}, Vx: {speed_x:.2f}, Vy: {speed_y:.2f}, Angle: {angle:.2f}"
                         cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                         
                         #Dessiner la direction du véhicule
